@@ -36,6 +36,20 @@ function isBlockedIPv6(host) {
   return false;
 }
 
+// IPv4-mapped IPv6 (::ffff:a.b.c.d 또는 정규화된 hex 형태 ::ffff:HHHH:HHHH).
+// WHATWG URL 은 [::ffff:127.0.0.1] 를 ::ffff:7f00:1 로 정규화한다 → 두 형태 모두 잡는다.
+function ipv4Mapped(host) {
+  if (!host.startsWith("::ffff:")) return null;
+  const tail = host.slice(7);
+  const v4 = isIPv4(tail);
+  if (v4) return v4;
+  const m = tail.match(/^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (!m) return null;
+  const high = parseInt(m[1], 16);
+  const low = parseInt(m[2], 16);
+  return [(high >> 8) & 0xff, high & 0xff, (low >> 8) & 0xff, low & 0xff];
+}
+
 export function isImageUrlAllowed(url) {
   if (typeof url !== "string" || url.length === 0) return false;
 
@@ -55,6 +69,10 @@ export function isImageUrlAllowed(url) {
   if (hostLower.startsWith("[") && hostLower.endsWith("]")) {
     hostLower = hostLower.slice(1, -1);
   }
+  // Trailing-dot FQDN(예: "foo.local.") 정규화 — endsWith(".local") 매칭이 빠지지 않도록.
+  if (hostLower.endsWith(".") && hostLower.length > 1) {
+    hostLower = hostLower.slice(0, -1);
+  }
 
   if (hostLower === "localhost") return false;
   if (hostLower.endsWith(".local")) return false;
@@ -67,6 +85,12 @@ export function isImageUrlAllowed(url) {
 
   // Heuristic: anything containing ':' is treated as IPv6.
   if (hostLower.includes(":")) {
+    // IPv4-mapped IPv6 (::ffff:a.b.c.d / ::ffff:HHHH:HHHH) 는 내장 IPv4 가 사설망이면 거부.
+    const mapped = ipv4Mapped(hostLower);
+    if (mapped) {
+      if (isPrivateIPv4(mapped)) return false;
+      return true;
+    }
     if (isBlockedIPv6(hostLower)) return false;
     return true;
   }

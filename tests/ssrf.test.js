@@ -32,6 +32,23 @@ describe("isImageUrlAllowed", () => {
     expect(isImageUrlAllowed("chrome-extension://abc/x.jpg")).toBe(false);
     expect(isImageUrlAllowed("data:image/png;base64,AAAA")).toBe(false);
   });
+
+  it("rejects IPv4-mapped IPv6 pointing at private IPv4", () => {
+    // WHATWG URL 은 [::ffff:127.0.0.1] 를 ::ffff:7f00:1 로 정규화한다 — 두 형태 모두 잡혀야 한다.
+    const cases = [
+      "https://[::ffff:127.0.0.1]/x.jpg",
+      "https://[::ffff:10.0.0.1]/x.jpg",
+      "https://[::ffff:192.168.1.1]/x.jpg",
+      "https://[::ffff:169.254.169.254]/x.jpg",
+    ];
+    for (const url of cases) {
+      expect(isImageUrlAllowed(url), `expected reject: ${url}`).toBe(false);
+    }
+  });
+
+  it("normalizes trailing-dot FQDN before .local check", () => {
+    expect(isImageUrlAllowed("https://foo.local./x.jpg")).toBe(false);
+  });
 });
 
 describe("filterImageUrls", () => {
