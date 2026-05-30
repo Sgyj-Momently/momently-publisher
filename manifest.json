@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Momently Publisher",
+  "version": "0.0.1",
+  "description": "Momently 콘솔 결과를 네이버 블로그 글쓰기에 보조 입력하는 확장 (Manifest V3).",
+  "background": {
+    "service_worker": "src/background/service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://momently.tpsg.co.kr/*",
+        "http://127.0.0.1:18580/*"
+      ],
+      "js": ["src/content/console-bridge.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ],
+  "permissions": [],
+  "host_permissions": []
+}
