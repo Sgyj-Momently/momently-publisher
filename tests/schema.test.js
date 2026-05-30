@@ -44,6 +44,22 @@ describe("validatePayload", () => {
     expect(result).toEqual({ ok: false, reason: "BAD_BLOCK_KIND" });
   });
 
+  it("rejects \\r (carriage return) as a control char", () => {
+    const p = minimalPayload({ title: "bad\rtitle" });
+    const result = validatePayload(p);
+    expect(result).toEqual({ ok: false, reason: "CONTROL_CHARS" });
+  });
+
+  it("does not propagate __proto__ keys into sanitized payload", () => {
+    const raw = JSON.parse(
+      '{"title":"ok","metaDescription":"ok","hashtags":[],"blocks":[{"kind":"text","markdown":"x"}],"imageUrls":[],"__proto__":{"polluted":true}}'
+    );
+    const result = validatePayload(raw);
+    expect(result.ok).toBe(true);
+    expect(result.sanitized.polluted).toBeUndefined();
+    expect({}.polluted).toBeUndefined();
+  });
+
   it("rejects payload exceeding 1MB with OVERSIZED", () => {
     // 60_000 char markdown × 20 blocks ≈ 1.2 MB. Block count stays within limit (<=200).
     const big = "x".repeat(60_000);

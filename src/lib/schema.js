@@ -14,7 +14,8 @@ const IMAGE_URLS_MAX_COUNT = 30;
 const PAYLOAD_MAX_BYTES = 1_000_000;
 
 // Control chars: \x00-\x1F except \n (0x0A) and \t (0x09); also \x7F.
-const CONTROL_CHAR_RE = /[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]/;
+// \r (0x0D) 도 차단해 HTTP 헤더 인젝션/로그 스플리팅 위험을 제거한다.
+const CONTROL_CHAR_RE = /[\x00-\x08\x0B-\x1F\x7F]/;
 
 function reject(reason) {
   return { ok: false, reason };
