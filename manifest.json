@@ -16,6 +16,15 @@
       "js": ["src/content/console-bridge.js"],
       "run_at": "document_start",
       "all_frames": false
+    },
+    {
+      "matches": [
+        "https://blog.naver.com/*",
+        "https://*.blog.naver.com/*"
+      ],
+      "js": ["src/content/naver-smarteditor.js"],
+      "run_at": "document_idle",
+      "all_frames": false
     }
   ],
   "permissions": [],
