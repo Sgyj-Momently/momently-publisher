@@ -1,17 +1,91 @@
 // background/service-worker.js — Manifest V3 ES module service worker.
-// 7a: echo-only. Applies nonce + schema + SSRF defenses on each forwarded
-// envelope. NO Naver/DOM interaction.
+//
+// 7a: 콘솔 브리지에서 온 envelope 에 nonce + schema + SSRF 방어를 적용.
+// 7b: 검증 통과 후 echo 만 하던 것을, blog.naver.com content script 로
+//     검증된 payload 를 RELAY 한다(port 기반). Naver 탭/포트가 없으면 구조화된
+//     { ok:false, reason:'NO_NAVER_TARGET' } 를 반환한다(graceful).
+//
+// port 기반 relay 라 background 가 탭을 직접 조회하지 않으므로 'tabs' 권한이
+// 필요 없다(host_permissions 도 content_scripts 매처로 충분). NO DOM interaction
+// in background.
 
 import { createNonceStore } from "../lib/nonce.js";
 import { validatePayload } from "../lib/schema.js";
 import { filterImageUrls } from "../lib/ssrf.js";
 
 const EXPECTED_TYPE = "momently/publish-request";
+const RELAY_PORT_NAME = "momently/naver-relay";
+const PUBLISH_MESSAGE_TYPE = "momently/publish-to-naver";
+
 const nonceStore = createNonceStore();
+
+// blog.naver.com content script 들이 connect 로 붙는 port 집합.
+// content script 가 살아있는 동안만 유지된다(탭 닫힘/이동 시 onDisconnect 로 제거).
+const naverPorts = new Set();
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== RELAY_PORT_NAME) return;
+  naverPorts.add(port);
+  port.onDisconnect.addListener(() => {
+    naverPorts.delete(port);
+  });
+});
 
 function reject(reason) {
   console.log(`[momently-publisher] reject reason=${reason}`);
   return { ok: false, reason };
+}
+
+// 검증된 payload 를 연결된 Naver content script 로 relay 한다.
+// content script 의 inject 결과({ ok, injected } 또는 { ok:false, reason })를
+// 그대로 콘솔로 돌려준다. 연결된 port 가 없으면 NO_NAVER_TARGET.
+function relayToNaver(sanitized) {
+  // 가장 최근에 붙은 port 를 대상으로 한다(여러 글쓰기 탭은 드묾).
+  let target = null;
+  for (const port of naverPorts) target = port;
+  if (!target) {
+    return Promise.resolve(reject("NO_NAVER_TARGET"));
+  }
+
+  const title = sanitized.title;
+  // 7b: 본문은 text 블록의 markdown 을 평문으로 이어붙인 것을 사용한다.
+  // 리치 렌더링(서식)은 7d 의 몫. 여기서는 단순 텍스트만 넘긴다.
+  const bodyText = Array.isArray(sanitized.blocks)
+    ? sanitized.blocks
+        .filter((b) => b && b.kind === "text" && typeof b.markdown === "string")
+        .map((b) => b.markdown)
+        .join("\n\n")
+    : "";
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const onResult = (message) => {
+      if (settled) return;
+      if (message === null || typeof message !== "object") return;
+      if (message.type !== "momently/publish-to-naver-result") return;
+      settled = true;
+      try {
+        target.onMessage.removeListener(onResult);
+      } catch {
+        // ignore
+      }
+      resolve(message.result || { ok: false, reason: "NO_RESULT" });
+    };
+
+    try {
+      target.onMessage.addListener(onResult);
+      target.postMessage({
+        type: PUBLISH_MESSAGE_TYPE,
+        payload: { title, bodyText },
+      });
+    } catch (err) {
+      if (!settled) {
+        settled = true;
+        resolve(reject("NO_NAVER_TARGET"));
+      }
+      console.warn("[momently-publisher] relay postMessage 실패", err);
+    }
+  });
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -46,7 +120,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const blockCount = Array.isArray(schemaResult.sanitized.blocks)
     ? schemaResult.sanitized.blocks.length
     : 0;
-  console.log(`[momently-publisher] echo accepted nonce=${nonce} blocks=${blockCount}`);
-  sendResponse({ ok: true });
-  return false;
+  console.log(
+    `[momently-publisher] accepted nonce=${nonce} blocks=${blockCount} → relay to Naver`
+  );
+
+  // 7b: echo 대신 검증된 payload 를 Naver content script 로 relay.
+  relayToNaver(schemaResult.sanitized).then((result) => {
+    sendResponse(result);
+  });
+  // async sendResponse 를 위해 true 반환(채널 유지).
+  return true;
 });
