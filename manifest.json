@@ -18,13 +18,17 @@
       "all_frames": false
     },
     {
-      "matches": [
-        "https://blog.naver.com/*",
-        "https://*.blog.naver.com/*"
-      ],
-      "js": ["src/content/naver-smarteditor.js"],
+      "matches": ["*://blog.naver.com/PostWriteForm.naver*"],
+      "js": ["src/content/naver-bridge.js"],
       "run_at": "document_idle",
-      "all_frames": false
+      "all_frames": true
+    },
+    {
+      "matches": ["*://blog.naver.com/PostWriteForm.naver*"],
+      "js": ["src/content/naver-smarteditor-main.js"],
+      "run_at": "document_idle",
+      "all_frames": true,
+      "world": "MAIN"
     }
   ],
   "permissions": [],
