@@ -15,9 +15,11 @@
 // ⚠️ ADR 007 hard constraint: 발행/등록(publish/submit) 메서드는 절대 호출하지 않는다.
 
 (() => {
-  // editor 가 없는 frame(상위 document 등)에서는 즉시 종료. 단, 메시지 핸들러는
-  // 등록해 두지 않는다 — editor frame 에서만 listener 가 살아있게 한다.
-  if (!window.SmartEditor || !window.SmartEditor._editors) return;
+  // window.SmartEditor 자체가 없는 frame(상위 document·버퍼 iframe 등)에서는 즉시 종료.
+  // editor frame 에서만 아래 listener 가 살아있게 한다. (_editors 는 document_idle
+  // 시점에 아직 안 채워졌을 수 있어 여기서는 SmartEditor 존재만 가드하고, 실제
+  // editor 준비 여부는 요청 처리 시점에 짧게 poll 한다.)
+  if (!window.SmartEditor) return;
 
   const REQUEST_TYPE = "momently/se-inject";
   const RESULT_TYPE = "momently/se-inject-result";
@@ -112,6 +114,10 @@
   }
   // ── 인라인 복제 끝 ──
 
+  // editor 준비를 짧게 기다리는 poll 상한. bridge timeout(4s)보다 작게.
+  const READY_MAX_TRIES = 20; // 20 × 100ms = 2s
+  const READY_POLL_MS = 100;
+
   window.addEventListener("message", (event) => {
     // intra-page MAIN↔ISOLATED: 같은 window/origin 만 신뢰.
     if (event.source !== window) return;
@@ -120,26 +126,41 @@
     if (data === null || typeof data !== "object") return;
     if (data.type !== REQUEST_TYPE) return;
 
+    // 요청 nonce 를 결과에 echo 한다. 같은 MAIN world 의 page 스크립트가 가짜 결과를
+    // 끼워넣거나 동시 주입이 교차하는 것을 bridge 측에서 nonce 매칭으로 거른다.
+    const nonce = typeof data.nonce === "string" ? data.nonce : null;
     const payload = data.payload && typeof data.payload === "object" ? data.payload : {};
     const title = typeof payload.title === "string" ? payload.title : "";
     const bodyText = typeof payload.bodyText === "string" ? payload.bodyText : "";
 
-    let result;
-    try {
-      const editor = locateEditor(window);
-      if (!editor) {
-        result = { ok: false, reason: "EDITOR_NOT_FOUND" };
-      } else {
-        result = applyToEditor(editor, { title, bodyText });
+    const reply = (result) => {
+      try {
+        window.postMessage({ type: RESULT_TYPE, nonce, result }, location.origin);
+      } catch {
+        // 비치명적 — bridge 측 timeout 이 처리한다.
       }
-    } catch (err) {
-      result = { ok: false, reason: "INJECT_EXCEPTION", message: String(err && err.message) };
-    }
+    };
 
-    try {
-      window.postMessage({ type: RESULT_TYPE, result }, location.origin);
-    } catch {
-      // 비치명적 — bridge 측 timeout 이 처리한다.
-    }
+    // _editors 가 document_idle 시점에 아직 안 채워졌을 수 있으므로 짧게 poll 한다.
+    let tries = 0;
+    const attempt = () => {
+      let result;
+      try {
+        const editor = locateEditor(window);
+        if (!editor) {
+          if (tries++ < READY_MAX_TRIES) {
+            setTimeout(attempt, READY_POLL_MS);
+            return;
+          }
+          result = { ok: false, reason: "EDITOR_NOT_FOUND" };
+        } else {
+          result = applyToEditor(editor, { title, bodyText });
+        }
+      } catch (err) {
+        result = { ok: false, reason: "INJECT_EXCEPTION", message: String(err && err.message) };
+      }
+      reply(result);
+    };
+    attempt();
   });
 })();

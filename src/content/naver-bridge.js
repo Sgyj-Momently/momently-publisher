@@ -25,11 +25,26 @@
   // 두어 hang 시 스스로 정리한다.
   const SE_INJECT_TIMEOUT_MS = 4000;
 
+  // intra-page 요청-응답 상관용 nonce. all_frames+MAIN world 라 page 의 다른
+  // 스크립트가 같은 window 를 공유하므로, 가짜 결과 끼워넣기·동시 주입 교차를
+  // nonce 매칭으로 거른다.
+  function genNonce() {
+    try {
+      if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+        return crypto.randomUUID();
+      }
+    } catch {
+      // fall through
+    }
+    return "n-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 12);
+  }
+
   // MAIN-world 스크립트에 주입을 요청하고 결과를 기다린다.
   function injectViaMainWorld(payload) {
     return new Promise((resolve) => {
       let settled = false;
       let timer = null;
+      const nonce = genNonce();
 
       const finish = (result) => {
         if (settled) return;
@@ -50,6 +65,7 @@
         const data = event.data;
         if (data === null || typeof data !== "object") return;
         if (data.type !== SE_RESULT_TYPE) return;
+        if (data.nonce !== nonce) return;
         finish(data.result || { ok: false, reason: "NO_RESULT" });
       };
 
@@ -58,7 +74,7 @@
       try {
         window.addEventListener("message", onMessage);
         window.postMessage(
-          { type: SE_REQUEST_TYPE, payload: { title: payload.title, bodyText: payload.bodyText } },
+          { type: SE_REQUEST_TYPE, nonce, payload: { title: payload.title, bodyText: payload.bodyText } },
           location.origin
         );
       } catch (err) {
