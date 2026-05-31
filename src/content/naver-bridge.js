@@ -110,6 +110,14 @@
         reason +
         ")";
       document.body.appendChild(banner);
+      // 영구 잔존 방지 — 일정 시간 후 자동 제거(다음 실패 시에도 위에서 제거됨).
+      setTimeout(() => {
+        try {
+          banner.remove();
+        } catch {
+          // ignore
+        }
+      }, 8000);
     } catch (err) {
       console.warn("[momently-publisher] 안내 배너 표시 실패", err);
     }
