@@ -59,18 +59,29 @@ function relayToNaver(sanitized) {
 
   return new Promise((resolve) => {
     let settled = false;
-    const onResult = (message) => {
+    let timer = null;
+    // 단일 정리 경로: listener 제거 + timer 해제 + 1회만 resolve.
+    const finish = (result) => {
       if (settled) return;
-      if (message === null || typeof message !== "object") return;
-      if (message.type !== "momently/publish-to-naver-result") return;
       settled = true;
+      if (timer !== null) clearTimeout(timer);
       try {
         target.onMessage.removeListener(onResult);
       } catch {
         // ignore
       }
-      resolve(message.result || { ok: false, reason: "NO_RESULT" });
+      resolve(result);
     };
+    const onResult = (message) => {
+      if (message === null || typeof message !== "object") return;
+      if (message.type !== "momently/publish-to-naver-result") return;
+      finish(message.result || { ok: false, reason: "NO_RESULT" });
+    };
+
+    // content script 가 응답하지 않고 port 만 살아있는 경우(주입 hang 등) 대비.
+    // 콘솔측 핸드셰이크 timeout(5s)보다 짧게 두어, hang 시 background 의 listener
+    // leak·미해결 sendResponse 채널을 스스로 정리한다.
+    timer = setTimeout(() => finish(reject("RELAY_TIMEOUT")), 4000);
 
     try {
       target.onMessage.addListener(onResult);
@@ -79,11 +90,8 @@ function relayToNaver(sanitized) {
         payload: { title, bodyText },
       });
     } catch (err) {
-      if (!settled) {
-        settled = true;
-        resolve(reject("NO_NAVER_TARGET"));
-      }
       console.warn("[momently-publisher] relay postMessage 실패", err);
+      finish(reject("NO_NAVER_TARGET"));
     }
   });
 }
